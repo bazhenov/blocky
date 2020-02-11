@@ -1,0 +1,9 @@
+[package]
+name = "block"
+version = "0.1.0"
+authors = ["Denis Bazhenov <bazhenov@farpost.com>"]
+edition = "2018"
+
+[dependencies]
+memmap = "0.7.0"
+tempdir = "0.3.7"
