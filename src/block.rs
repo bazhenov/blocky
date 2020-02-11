@@ -1,55 +1,60 @@
-use memmap::Mmap;
+use std::borrow::Borrow;
+use std::io::{Error, ErrorKind::NotFound};
 use std::path::Path;
 
-type Md5 = [u8; 16];
-
 #[derive(Copy, Clone)]
-pub struct FileInfo {
-}
+pub struct FileInfo {}
 
 pub struct Block {
-  file_info: Vec<FileInfo>,
-  mmap: Option<Mmap>,
+    file_info: Vec<FileInfo>,
 }
 
 impl Block {
+    pub fn from_files<T: AsRef<Path>>(work_dir: &T, files: &[T]) -> Result<Block, Error> {
+        let absolute_file_names = files
+            .iter()
+            .map(|f| work_dir.as_ref().join(f))
+            .collect::<Vec<_>>();
+        let first_missing_file = absolute_file_names.iter().find(|f| !f.is_file());
+        if let Some(file) = first_missing_file {
+            let message = format!("File: {} not found", file.display());
+            return Err(Error::new(NotFound, message));
+        }
 
-  pub fn from_files<T: AsRef<Path>>(files: &[T]) -> Block {
-    Block {
-      file_info: vec![FileInfo{}; files.len()],
-      mmap: None
+        Ok(Block {
+            file_info: vec![FileInfo {}; files.len()],
+        })
     }
-  }
 
-  pub fn len(&self) -> usize {
-    self.file_info.len()
-  }
+    pub fn len(&self) -> usize {
+        self.file_info.len()
+    }
 }
 
 #[cfg(test)]
 mod tests {
 
-  use super::*;
-  use tempdir;
-  use std::io::{self, Write};
-  use std::fs::File;
+    use super::*;
+    use std::fs::File;
+    use std::io::{self, Write};
+    use tempdir;
 
-  #[test]
-  fn should_create_empty_block() -> Result<(), io::Error> {
-    let tmp = tempdir::TempDir::new("rust-block-test")?;
-    let mut files = vec![];
-    
-    let p = tmp.path().join("1.bin");
-    writeln!(File::create(&p)?, "Hello")?;
-    files.push(p);
+    #[test]
+    fn should_create_empty_block() -> Result<(), io::Error> {
+        let tmp = tempdir::TempDir::new("rust-block-test")?;
+        let mut files = vec![];
 
-    let p = tmp.path().join("2.bin");
-    writeln!(File::create(&p)?, "World")?;
-    files.push(p);
+        let p = Path::new("1.bin");
+        writeln!(File::create(&tmp.path().join(p))?, "Hello")?;
+        files.push(p);
 
-    let block = Block::from_files(&files[..]);
-    assert_eq!(block.len(), 2);
+        let p = Path::new("2.bin");
+        writeln!(File::create(&tmp.path().join(p))?, "World")?;
+        files.push(p);
 
-    Ok(())
-  }
+        let block = Block::from_files(&tmp.path(), &files[..])?;
+        assert_eq!(block.len(), 2);
+
+        Ok(())
+    }
 }

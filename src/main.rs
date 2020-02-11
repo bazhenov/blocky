@@ -1,7 +1,7 @@
 use memmap::MmapOptions;
-use std::fs::File;
-use std::error::Error;
 use std::env;
+use std::error::Error;
+use std::fs::File;
 
 mod block;
 
