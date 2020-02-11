@@ -21,7 +21,8 @@ impl Block {
             return Err(Error::new(NotFound, message));
         }
 
-        Ok(Block {
+        Ok(
+            Block {
             file_info: vec![FileInfo {}; files.len()],
         })
     }
