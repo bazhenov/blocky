@@ -126,20 +126,21 @@ mod tests {
     use std::io::{Cursor, Write};
     use tempdir;
 
+    fn fixture(files: &[(impl AsRef<Path>, &str)]) -> Result<Block> {
+        let tmp = tempdir::TempDir::new("rust-block-test")?;
+        let mut f = vec![];
+
+        for (file_name, content) in files {
+            write!(File::create(&tmp.path().join(file_name))?, "{}", content)?;
+            f.push(file_name.as_ref());
+        }
+
+        Ok(Block::from_files(&tmp.path(), &f)?)
+    }
+
     #[test]
     fn should_create_empty_block() -> Result<()> {
-        let tmp = tempdir::TempDir::new("rust-block-test")?;
-        let mut files = vec![];
-
-        let p = Path::new("1.bin");
-        writeln!(File::create(&tmp.path().join(p))?, "Hello")?;
-        files.push(p);
-
-        let p = Path::new("2.bin");
-        writeln!(File::create(&tmp.path().join(p))?, "World")?;
-        files.push(p);
-
-        let block = Block::from_files(&tmp.path(), &files)?;
+        let block = fixture(&[("1.bin", "Hello"), ("2.bin", "World")])?;
         assert_eq!(block.len(), 2);
 
         Ok(())
