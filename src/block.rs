@@ -92,7 +92,7 @@ impl SelfSerialize for Block {
 }
 
 impl Block {
-    pub fn from_files<T: AsRef<Path>>(work_dir: &T, files: &[T]) -> Result<Block> {
+    pub fn from_files<T: AsRef<Path>, K: AsRef<Path>>(work_dir: &K, files: &[T]) -> Result<Block> {
         let absolute_file_names = files
             .iter()
             .map(|f| work_dir.as_ref().join(f))
@@ -135,7 +135,9 @@ mod tests {
             f.push(file_name.as_ref());
         }
 
-        Ok(Block::from_files(&tmp.path(), &f)?)
+        let file_names = files.iter().map(|i| &i.0).collect::<Vec<_>>();
+
+        Ok(Block::from_files(&tmp.path(), &file_names)?)
     }
 
     #[test]
