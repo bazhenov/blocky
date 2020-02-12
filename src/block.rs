@@ -126,12 +126,13 @@ mod tests {
     use std::io::{Cursor, Write};
     use tempdir;
 
-    fn fixture(files: &[(impl AsRef<Path>, &str)]) -> Result<Block> {
+    fn fixture(files: &[(impl AsRef<Path>, impl AsRef<[u8]>)]) -> Result<Block> {
         let tmp = tempdir::TempDir::new("rust-block-test")?;
         let mut f = vec![];
 
         for (file_name, content) in files {
-            write!(File::create(&tmp.path().join(file_name))?, "{}", content)?;
+            let mut file = File::create(&tmp.path().join(file_name))?;
+            file.write_all(content.as_ref())?;
             f.push(file_name.as_ref());
         }
 
