@@ -2,8 +2,9 @@ use byteorder::{ReadBytesExt, WriteBytesExt, LE};
 use std::convert::TryFrom;
 use std::fmt::Debug;
 use std::io::Result;
-use std::io::{Error, ErrorKind::InvalidData, ErrorKind::NotFound};
+use std::io::{Error, ErrorKind::InvalidData, ErrorKind::NotFound, BufWriter, BufReader, Write};
 use std::path::Path;
+use std::fs::File;
 
 type Md5 = [u8; 16];
 
@@ -71,8 +72,12 @@ impl SelfSerialize for Block {
         target.write_u16::<LE>(self.version)?;
         let len = self.file_info.len();
         let file_info_len =
-            u32::try_from(len).map_err(|_| Error::new(InvalidData, "To mush files"))?;
+            u32::try_from(len).map_err(|_| Error::new(InvalidData, "To muсh files"))?;
         target.write_u32::<LE>(file_info_len)?;
+        
+        for file_info in self.file_info.iter() {
+            file_info.encode(target)?;
+        }
 
         Ok(())
     }
@@ -92,7 +97,12 @@ impl SelfSerialize for Block {
 }
 
 impl Block {
-    pub fn from_files<T: AsRef<Path>, K: AsRef<Path>>(work_dir: &K, files: &[T]) -> Result<Block> {
+    pub fn from_files<K, T, B>(block_path: B, work_dir: &K, files: &[T]) -> Result<Block>
+    where
+        T: AsRef<Path>,
+        K: AsRef<Path>,
+        B: AsRef<Path>,
+    {
         let absolute_file_names = files
             .iter()
             .map(|f| work_dir.as_ref().join(f))
@@ -107,10 +117,26 @@ impl Block {
             .iter()
             .map(FileInfo::from_file)
             .collect();
-        Ok(Block {
+
+        let mut block_file = BufWriter::new(File::create(&block_path)?);
+        let block = Block {
             version: 1,
             file_info: file_infos,
-        })
+        };
+
+        block.encode(&mut block_file)?;
+        block_file.flush()?;
+        
+        Ok(block)
+    }
+
+    pub fn open(path: impl AsRef<Path>) -> Result<Self> {
+        let f = File::open(path)?;
+        let size = f.metadata()?.len();
+        let mut block_file = BufReader::new(f);
+
+        let block = Block::decode(&mut block_file)?;
+        Ok(block)
     }
 
     pub fn len(&self) -> usize {
@@ -128,17 +154,17 @@ mod tests {
 
     fn fixture(files: &[(impl AsRef<Path>, impl AsRef<[u8]>)]) -> Result<Block> {
         let tmp = tempdir::TempDir::new("rust-block-test")?;
-        let mut f = vec![];
 
         for (file_name, content) in files {
             let mut file = File::create(&tmp.path().join(file_name))?;
             file.write_all(content.as_ref())?;
-            f.push(file_name.as_ref());
         }
 
         let file_names = files.iter().map(|i| &i.0).collect::<Vec<_>>();
 
-        Ok(Block::from_files(&tmp.path(), &file_names)?)
+        let block_path = &tmp.path().join("test.block");
+        Block::from_files(block_path, &tmp.path(), &file_names)?;
+        Ok(Block::open(block_path)?)
     }
 
     #[test]
