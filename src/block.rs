@@ -1,10 +1,10 @@
 use byteorder::{ReadBytesExt, WriteBytesExt, LE};
 use std::convert::TryFrom;
 use std::fmt::Debug;
-use std::io::Result;
-use std::io::{Error, ErrorKind::InvalidData, ErrorKind::NotFound, BufWriter, BufReader, Write};
-use std::path::Path;
 use std::fs::File;
+use std::io::Result;
+use std::io::{BufReader, BufWriter, Error, ErrorKind::InvalidData, ErrorKind::NotFound, Write};
+use std::path::Path;
 
 type Md5 = [u8; 16];
 
@@ -35,9 +35,16 @@ pub struct FileInfo {
     file_name_hash: Md5,
 }
 
+pub struct AddFileRequest<'a> {
+    id: u64,
+    path: &'a Path,
+}
+
 impl FileInfo {
-    fn from_file(path: impl AsRef<Path>) -> Self {
-        Default::default()
+    fn new(file: &AddFileRequest) -> Self {
+        let mut info: Self = Default::default();
+        info.id = file.id;
+        return info;
     }
 }
 
@@ -74,7 +81,7 @@ impl SelfSerialize for Block {
         let file_info_len =
             u32::try_from(len).map_err(|_| Error::new(InvalidData, "To muсh files"))?;
         target.write_u32::<LE>(file_info_len)?;
-        
+
         for file_info in self.file_info.iter() {
             file_info.encode(target)?;
         }
@@ -97,26 +104,15 @@ impl SelfSerialize for Block {
 }
 
 impl Block {
-    pub fn from_files<K, T, B>(block_path: B, work_dir: &K, files: &[T]) -> Result<Block>
-    where
-        T: AsRef<Path>,
-        K: AsRef<Path>,
-        B: AsRef<Path>,
-    {
-        let absolute_file_names = files
-            .iter()
-            .map(|f| work_dir.as_ref().join(f))
-            .collect::<Vec<_>>();
-        let first_missing_file = absolute_file_names.iter().find(|f| !f.is_file());
+    pub fn from_files(block_path: impl AsRef<Path>, files: &[AddFileRequest]) -> Result<Block> {
+        let file_names = files.iter().map(|f| f.path).collect::<Vec<_>>();
+        let first_missing_file = file_names.iter().find(|f| !f.is_file());
         if let Some(file) = first_missing_file {
             let message = format!("File: {} not found", file.display());
             return Err(Error::new(NotFound, message));
         }
 
-        let file_infos = absolute_file_names
-            .iter()
-            .map(FileInfo::from_file)
-            .collect();
+        let file_infos = files.iter().map(FileInfo::new).collect();
 
         let mut block_file = BufWriter::new(File::create(&block_path)?);
         let block = Block {
@@ -126,13 +122,12 @@ impl Block {
 
         block.encode(&mut block_file)?;
         block_file.flush()?;
-        
+
         Ok(block)
     }
 
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         let f = File::open(path)?;
-        let size = f.metadata()?.len();
         let mut block_file = BufReader::new(f);
 
         let block = Block::decode(&mut block_file)?;
@@ -141,6 +136,10 @@ impl Block {
 
     pub fn len(&self) -> usize {
         self.file_info.len()
+    }
+
+    pub fn list_file_info(&self) -> impl Iterator<Item = &FileInfo> {
+        self.file_info.iter()
     }
 }
 
@@ -160,10 +159,18 @@ mod tests {
             file.write_all(content.as_ref())?;
         }
 
-        let file_names = files.iter().map(|i| &i.0).collect::<Vec<_>>();
+        let absolute_file_names = files
+            .iter()
+            .map(|i| tmp.path().join(i.0.as_ref()))
+            .collect::<Vec<_>>();
+
+        let files = absolute_file_names
+            .iter()
+            .map(|path| AddFileRequest { id: 1, path: path })
+            .collect::<Vec<_>>();
 
         let block_path = &tmp.path().join("test.block");
-        Block::from_files(block_path, &tmp.path(), &file_names)?;
+        Block::from_files(block_path, &files)?;
         Ok(Block::open(block_path)?)
     }
 
@@ -171,6 +178,10 @@ mod tests {
     fn should_create_empty_block() -> Result<()> {
         let block = fixture(&[("1.bin", "Hello"), ("2.bin", "World")])?;
         assert_eq!(block.len(), 2);
+
+        let info = block.list_file_info().collect::<Vec<_>>();
+
+        assert!(info.iter().all(|i| i.id > 0));
 
         Ok(())
     }
