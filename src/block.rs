@@ -26,7 +26,7 @@ pub struct FileInfo {
     id: u64,
 
     /// Размер файла в байтах
-    size: u32,
+    size: u64,
 
     /// Смещение первого байта файла относительно налача файла
     offset: u32,
@@ -41,30 +41,32 @@ pub struct AddFileRequest<'a> {
 }
 
 impl FileInfo {
-    fn new(file: &AddFileRequest) -> Self {
+    fn new(file: &AddFileRequest) -> Result<Self> {
         let mut info: Self = Default::default();
         info.id = file.id;
-        return info;
+        info.size = file.path.metadata()?.len();
+
+        return Ok(info);
     }
 }
 
 impl SelfSerialize for FileInfo {
+    fn encode(&self, target: &mut impl WriteBytesExt) -> Result<()> {
+        target.write_u64::<LE>(self.id)?;
+        target.write_u64::<LE>(self.size)?;
+        target.write_u32::<LE>(self.offset)?;
+        target.write_all(&self.file_name_hash)?;
+        Ok(())
+    }
+
     fn decode(source: &mut impl ReadBytesExt) -> Result<Self> {
         let mut info: Self = Default::default();
         info.id = source.read_u64::<LE>()?;
-        info.size = source.read_u32::<LE>()?;
+        info.size = source.read_u64::<LE>()?;
         info.offset = source.read_u32::<LE>()?;
         source.read_exact(&mut info.file_name_hash)?;
 
         Ok(info)
-    }
-
-    fn encode(&self, target: &mut impl WriteBytesExt) -> Result<()> {
-        target.write_u64::<LE>(self.id)?;
-        target.write_u32::<LE>(self.size)?;
-        target.write_u32::<LE>(self.offset)?;
-        target.write_all(&self.file_name_hash)?;
-        Ok(())
     }
 }
 
@@ -79,7 +81,7 @@ impl SelfSerialize for Block {
         target.write_u16::<LE>(self.version)?;
         let len = self.file_info.len();
         let file_info_len =
-            u32::try_from(len).map_err(|_| Error::new(InvalidData, "To muсh files"))?;
+            u32::try_from(len).map_err(|_| Error::new(InvalidData, "To much files"))?;
         target.write_u32::<LE>(file_info_len)?;
 
         for file_info in self.file_info.iter() {
@@ -112,7 +114,7 @@ impl Block {
             return Err(Error::new(NotFound, message));
         }
 
-        let file_infos = files.iter().map(FileInfo::new).collect();
+        let file_infos = files.iter().map(FileInfo::new).collect::<Result<_>>()?;
 
         let mut block_file = BufWriter::new(File::create(&block_path)?);
         let block = Block {
@@ -138,7 +140,7 @@ impl Block {
         self.file_info.len()
     }
 
-    pub fn list_file_info(&self) -> impl Iterator<Item = &FileInfo> {
+    pub fn iter(&self) -> impl Iterator<Item = &FileInfo> {
         self.file_info.iter()
     }
 }
@@ -166,7 +168,7 @@ mod tests {
 
         let files = absolute_file_names
             .iter()
-            .map(|path| AddFileRequest { id: 1, path: path })
+            .map(|path| AddFileRequest { id: 1, path })
             .collect::<Vec<_>>();
 
         let block_path = &tmp.path().join("test.block");
@@ -179,9 +181,10 @@ mod tests {
         let block = fixture(&[("1.bin", "Hello"), ("2.bin", "World")])?;
         assert_eq!(block.len(), 2);
 
-        let info = block.list_file_info().collect::<Vec<_>>();
-
+        let info = block.iter().collect::<Vec<_>>();
         assert!(info.iter().all(|i| i.id > 0));
+        assert_eq!(info[0].size, 5);
+        assert_eq!(info[1].size, 5);
 
         Ok(())
     }
