@@ -23,16 +23,16 @@ trait SelfSerialize {
 #[derive(Eq, PartialEq, Debug, Default)]
 pub struct FileInfo {
     /// Глобальный идентификатор файла в системе
-    id: u64,
+    pub id: u64,
 
     /// Размер файла в байтах
-    size: u64,
+    pub size: u64,
 
     /// Смещение первого байта файла относительно налача файла
-    offset: u32,
+    pub offset: u32,
 
     /// MD5 контрольная сумма нормализованного абсолютого имени файла
-    file_name_hash: Md5,
+    pub file_name_hash: Md5,
 }
 
 pub struct AddFileRequest<'a> {
@@ -151,7 +151,6 @@ mod tests {
     use super::*;
     use std::fs::File;
     use std::io::{Cursor, Write};
-    use std::ops::Add;
     use tempdir;
 
     fn fixture(files: &[(impl AsRef<Path>, impl AsRef<[u8]>)]) -> Result<Block> {
