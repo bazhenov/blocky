@@ -151,6 +151,7 @@ mod tests {
     use super::*;
     use std::fs::File;
     use std::io::{Cursor, Write};
+    use std::ops::Add;
     use tempdir;
 
     fn fixture(files: &[(impl AsRef<Path>, impl AsRef<[u8]>)]) -> Result<Block> {
@@ -168,7 +169,11 @@ mod tests {
 
         let files = absolute_file_names
             .iter()
-            .map(|path| AddFileRequest { id: 1, path })
+            .enumerate()
+            .map(|i| AddFileRequest {
+                id: (i.0 + 1) as u64,
+                path: i.1,
+            })
             .collect::<Vec<_>>();
 
         let block_path = &tmp.path().join("test.block");
@@ -190,7 +195,7 @@ mod tests {
     }
 
     #[test]
-    fn foo() -> Result<()> {
+    fn read_write_cycle() -> Result<()> {
         test_read_write_cycle(&Block {
             version: 3,
             file_info: vec![Default::default()],
