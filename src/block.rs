@@ -1,12 +1,12 @@
 use byteorder::{ReadBytesExt, WriteBytesExt, LE};
+use md5;
 use std::convert::TryFrom;
 use std::fmt::Debug;
 use std::fs::File;
 use std::io::Result;
 use std::io::{BufReader, BufWriter, Error, ErrorKind::InvalidData, ErrorKind::NotFound, Write};
+use std::ops::DerefMut;
 use std::path::Path;
-
-type Md5 = [u8; 16];
 
 /// Трейт позволяющий произвольному типу самостоятельно реализовать логику
 /// собственной сераилизации/десериализации используя библиотеку byteorder.
@@ -20,7 +20,7 @@ trait SelfSerialize {
         Self: Sized;
 }
 
-#[derive(Eq, PartialEq, Debug, Default)]
+#[derive(Eq, PartialEq, Debug)]
 pub struct FileInfo {
     /// Глобальный идентификатор файла в системе
     pub id: u64,
@@ -32,21 +32,23 @@ pub struct FileInfo {
     pub offset: u32,
 
     /// MD5 контрольная сумма нормализованного абсолютого имени файла
-    pub file_name_hash: Md5,
+    pub location_hash: md5::Digest,
 }
 
 pub struct AddFileRequest<'a> {
     id: u64,
     path: &'a Path,
+    location: &'a Path,
 }
 
 impl FileInfo {
     fn new(file: &AddFileRequest) -> Result<Self> {
-        let mut info: Self = Default::default();
-        info.id = file.id;
-        info.size = file.path.metadata()?.len();
-
-        return Ok(info);
+        Ok(Self {
+            id: file.id,
+            size: file.path.metadata()?.len(),
+            offset: 0,
+            location_hash: md5::compute(file.location.to_str().unwrap()),
+        })
     }
 }
 
@@ -55,18 +57,23 @@ impl SelfSerialize for FileInfo {
         target.write_u64::<LE>(self.id)?;
         target.write_u64::<LE>(self.size)?;
         target.write_u32::<LE>(self.offset)?;
-        target.write_all(&self.file_name_hash)?;
+        target.write_all(self.location_hash.as_ref())?;
         Ok(())
     }
 
     fn decode(source: &mut impl ReadBytesExt) -> Result<Self> {
-        let mut info: Self = Default::default();
-        info.id = source.read_u64::<LE>()?;
-        info.size = source.read_u64::<LE>()?;
-        info.offset = source.read_u32::<LE>()?;
-        source.read_exact(&mut info.file_name_hash)?;
+        let id = source.read_u64::<LE>()?;
+        let size = source.read_u64::<LE>()?;
+        let offset = source.read_u32::<LE>()?;
+        let mut location_hash = md5::Digest([0; 16]);
+        source.read_exact(location_hash.deref_mut())?;
 
-        Ok(info)
+        Ok(Self {
+            id,
+            size,
+            offset,
+            location_hash,
+        })
     }
 }
 
@@ -155,29 +162,35 @@ mod tests {
 
     fn fixture(files: &[(impl AsRef<Path>, impl AsRef<[u8]>)]) -> Result<Block> {
         let tmp = tempdir::TempDir::new("rust-block-test")?;
+        let tmp = tmp.path();
+
+        let mut absolute_file_names = vec![];
+        let mut locations = vec![];
+        let root = Path::new("/");
 
         for (file_name, content) in files {
-            let mut file = File::create(&tmp.path().join(file_name))?;
+            let path = tmp.join(file_name);
+            let mut file = File::create(&path)?;
             file.write_all(content.as_ref())?;
-        }
 
-        let absolute_file_names = files
-            .iter()
-            .map(|i| tmp.path().join(i.0.as_ref()))
-            .collect::<Vec<_>>();
+            locations.push(root.join(file_name));
+            absolute_file_names.push(path);
+        }
 
         let files = absolute_file_names
             .iter()
+            .zip(locations.iter())
             .enumerate()
             .map(|i| AddFileRequest {
                 id: (i.0 + 1) as u64,
-                path: i.1,
+                path: (i.1).0,
+                location: (i.1).1,
             })
             .collect::<Vec<_>>();
 
-        let block_path = &tmp.path().join("test.block");
-        Block::from_files(block_path, &files)?;
-        Ok(Block::open(block_path)?)
+        let block_path = tmp.join("test.block");
+        Block::from_files(&block_path, &files)?;
+        Ok(Block::open(&block_path)?)
     }
 
     #[test]
@@ -187,8 +200,18 @@ mod tests {
 
         let info = block.iter().collect::<Vec<_>>();
         assert!(info.iter().all(|i| i.id > 0));
+
         assert_eq!(info[0].size, 5);
+        assert_eq!(
+            format!("{:x}", info[0].location_hash),
+            "d0e14e5f5e76ec1a00e5fb02e4b47d9a"
+        );
+
         assert_eq!(info[1].size, 5);
+        assert_eq!(
+            format!("{:x}", info[1].location_hash),
+            "475e9b6e16f464efea93b8312b90ec02"
+        );
 
         Ok(())
     }
@@ -197,7 +220,12 @@ mod tests {
     fn read_write_cycle() -> Result<()> {
         test_read_write_cycle(&Block {
             version: 3,
-            file_info: vec![Default::default()],
+            file_info: vec![FileInfo {
+                id: 1,
+                size: 15,
+                offset: 0,
+                location_hash: md5::Digest([0u8; 16]),
+            }],
         })
     }
 

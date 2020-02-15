@@ -50,7 +50,7 @@ fn inspect(block_path: impl AsRef<Path>) -> Result<(), Box<dyn Error>> {
             id = file.id,
             size = file.size,
             offset = file.offset,
-            hash = md5::Digest(file.file_name_hash)
+            hash = file.location_hash
         );
     }
 
