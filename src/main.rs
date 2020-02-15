@@ -2,11 +2,11 @@ extern crate clap;
 extern crate md5;
 
 use std::error::Error;
+use std::io;
 use std::path::Path;
-use std::{env, io};
 
 use crate::block::Block;
-use clap::{App, Arg, SubCommand};
+use clap::{App, SubCommand};
 
 mod block;
 
