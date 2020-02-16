@@ -1,17 +1,35 @@
 extern crate clap;
 extern crate md5;
+#[macro_use]
+extern crate error_chain;
 
-use std::error::Error;
+use crate::block::{AddFileRequest, Block};
+use clap::{App, SubCommand, Values};
+pub use errors::*;
 use std::io::{self, Write};
 use std::path::Path;
 
-use clap::{App, SubCommand, Values};
-
-use crate::block::{AddFileRequest, Block};
-
 mod block;
 
-fn main() -> Result<(), Box<dyn Error>> {
+mod errors {
+    error_chain! {
+        errors {
+            NoFilesInBlock {
+
+            }
+            BlockCorrupted {
+                description("Illegal block structure")
+            }
+        }
+        foreign_links {
+            Io(::std::io::Error);
+        }
+    }
+}
+
+quick_main!(application);
+
+fn application() -> Result<()> {
     let app = App::new("block")
         .version("1.0")
         .author("Denis Bazhenov <dotsid@gmail.com>")
@@ -49,7 +67,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 /// Создает блок на основании файлов на локальной ФС
 ///
 /// В данный момент файлы (их идентификаторы) нумеруются в блоке последовательно.
-fn create(block_path: impl AsRef<Path>, files: Values) -> Result<(), Box<dyn Error>> {
+fn create(block_path: impl AsRef<Path>, files: Values) -> Result<()> {
     let files = files
         .enumerate()
         .map(|i| AddFileRequest {
@@ -61,16 +79,17 @@ fn create(block_path: impl AsRef<Path>, files: Values) -> Result<(), Box<dyn Err
         .collect::<Vec<_>>();
     Block::from_files(block_path, &files)
         .map(|_| ())
-        .map_err(Into::into)
+        .chain_err(|| "Unable to open file")
 }
 
 /// Выводит информацию о содержимом блока
-fn inspect(block_paths: Values) -> Result<(), Box<dyn Error>> {
+fn inspect(block_paths: Values) -> Result<()> {
     let stdout = io::stdout();
     let mut out = io::BufWriter::new(stdout.lock());
     for block_path in block_paths {
         out.write_fmt(format_args!("{}\n", block_path))?;
-        let block = Block::open(block_path)?;
+        let block =
+            Block::open(block_path).chain_err(|| format!("Fail to open block: {}", block_path))?;
         out.write_fmt(format_args!(
             "{id:>10} {size:>10} {offset:>10} {hash:>35}\n",
             id = "ID",

@@ -1,9 +1,9 @@
+use crate::errors::*;
 use byteorder::{ReadBytesExt, WriteBytesExt, LE};
 use md5;
 use std::convert::TryFrom;
 use std::fmt::Debug;
 use std::fs::File;
-use std::io::Result;
 use std::io::{BufReader, BufWriter, Error, ErrorKind::InvalidData, ErrorKind::NotFound, Write};
 use std::ops::DerefMut;
 use std::path::Path;
@@ -136,7 +136,7 @@ impl SelfSerialize for Block {
         target.write_u16::<LE>(self.version)?;
         let len = self.file_info.len();
         let file_info_len =
-            u32::try_from(len).map_err(|_| Error::new(InvalidData, "To much files"))?;
+            u32::try_from(len).chain_err(|| "File id can't fit in u32")?;
         target.write_u32::<LE>(file_info_len)?;
 
         for file_info in self.file_info.iter() {
@@ -163,13 +163,13 @@ impl SelfSerialize for Block {
 impl Block {
     pub fn from_files(block_path: impl AsRef<Path>, files: &[AddFileRequest]) -> Result<Block> {
         if files.len() <= 0 {
-            return Err(Error::new(InvalidData, "No files are given"));
+            bail!(ErrorKind::NoFilesInBlock);
         }
         let file_names = files.iter().map(|f| f.path).collect::<Vec<_>>();
         let first_missing_file = file_names.iter().find(|f| !f.is_file());
         if let Some(file) = first_missing_file {
             let message = format!("File: {} not found", file.display());
-            return Err(Error::new(NotFound, message));
+            return Err(Error::new(NotFound, message).into());
         }
 
         let file_infos = files.iter().map(FileInfo::new).collect::<Result<_>>()?;
@@ -180,18 +180,17 @@ impl Block {
             file_info: file_infos,
         };
 
-        block.encode(&mut block_file)?;
+        block.encode(&mut block_file).chain_err(|| "Unable to write block header")?;
         block_file.flush()?;
 
         Ok(block)
     }
 
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
-        let f = File::open(path)?;
+        let f = File::open(&path)?;
         let mut block_file = BufReader::new(f);
 
-        let block = Block::decode(&mut block_file)?;
-        Ok(block)
+        Block::decode(&mut block_file).chain_err(|| ErrorKind::BlockCorrupted)
     }
 
     pub fn len(&self) -> usize {
