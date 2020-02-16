@@ -19,7 +19,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .subcommand(
             SubCommand::with_name("inspect")
                 .about("Inspect block contents")
-                .arg_from_usage("<INPUT> 'Block file name to inspect'"),
+                .arg_from_usage("<INPUT>... 'Block file names to inspect'"),
         )
         .subcommand(
             SubCommand::with_name("create")
@@ -31,7 +31,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let matches = app.clone().get_matches();
     match matches.subcommand() {
         ("inspect", Some(opts)) => {
-            let path = opts.value_of("INPUT").unwrap();
+            let path = opts.values_of("INPUT").unwrap();
             inspect(path)
         }
         ("create", Some(opts)) => {
@@ -65,24 +65,27 @@ fn create(block_path: impl AsRef<Path>, files: Values) -> Result<(), Box<dyn Err
 }
 
 /// Выводит информацию о содержимом блока
-fn inspect(block_path: impl AsRef<Path>) -> Result<(), Box<dyn Error>> {
-    let block = Block::open(block_path)?;
-    println!(
-        "{id:>10} {size:>10} {offset:>10} {hash:>35}",
-        id = "ID",
-        size = "SIZE",
-        offset = "OFFSET",
-        hash = "HASH",
-    );
-
-    for file in block.iter() {
+fn inspect(block_paths: Values) -> Result<(), Box<dyn Error>> {
+    for block_path in block_paths {
+        println!("{}", block_path);
+        let block = Block::open(block_path)?;
         println!(
-            "{id:>10} {size:>10} {offset:>10}    {hash:x}",
-            id = file.id,
-            size = file.size,
-            offset = file.offset,
-            hash = file.location_hash
+            "{id:>10} {size:>10} {offset:>10} {hash:>35}",
+            id = "ID",
+            size = "SIZE",
+            offset = "OFFSET",
+            hash = "HASH",
         );
+
+        for file in block.iter() {
+            println!(
+                "{id:>10} {size:>10} {offset:>10}    {hash:x}",
+                id = file.id,
+                size = file.size,
+                offset = file.offset,
+                hash = file.location_hash
+            );
+        }
     }
 
     Ok(())
