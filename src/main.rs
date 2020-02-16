@@ -2,7 +2,7 @@ extern crate clap;
 extern crate md5;
 
 use std::error::Error;
-use std::io;
+use std::io::{self, Write};
 use std::path::Path;
 
 use clap::{App, SubCommand, Values};
@@ -66,25 +66,27 @@ fn create(block_path: impl AsRef<Path>, files: Values) -> Result<(), Box<dyn Err
 
 /// Выводит информацию о содержимом блока
 fn inspect(block_paths: Values) -> Result<(), Box<dyn Error>> {
+    let stdout = io::stdout();
+    let mut out = io::BufWriter::new(stdout.lock());
     for block_path in block_paths {
-        println!("{}", block_path);
+        out.write_fmt(format_args!("{}\n", block_path))?;
         let block = Block::open(block_path)?;
-        println!(
-            "{id:>10} {size:>10} {offset:>10} {hash:>35}",
+        out.write_fmt(format_args!(
+            "{id:>10} {size:>10} {offset:>10} {hash:>35}\n",
             id = "ID",
             size = "SIZE",
             offset = "OFFSET",
             hash = "HASH",
-        );
+        ))?;
 
         for file in block.iter() {
-            println!(
-                "{id:>10} {size:>10} {offset:>10}    {hash:x}",
+            out.write_fmt(format_args!(
+                "{id:>10} {size:>10} {offset:>10}    {hash:x}\n",
                 id = file.id,
                 size = file.size,
                 offset = file.offset,
                 hash = file.location_hash
-            );
+            ))?;
         }
     }
 
