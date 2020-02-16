@@ -36,9 +36,9 @@ pub struct FileInfo {
 }
 
 pub struct AddFileRequest<'a> {
-    id: u64,
-    path: &'a Path,
-    location: &'a Path,
+    pub id: u64,
+    pub path: &'a Path,
+    pub location: &'a Path,
 }
 
 impl FileInfo {
@@ -114,6 +114,9 @@ impl SelfSerialize for Block {
 
 impl Block {
     pub fn from_files(block_path: impl AsRef<Path>, files: &[AddFileRequest]) -> Result<Block> {
+        if files.len() <= 0 {
+            return Err(Error::new(InvalidData, "No files are given"));
+        }
         let file_names = files.iter().map(|f| f.path).collect::<Vec<_>>();
         let first_missing_file = file_names.iter().find(|f| !f.is_file());
         if let Some(file) = first_missing_file {
@@ -194,7 +197,7 @@ mod tests {
     }
 
     #[test]
-    fn should_create_empty_block() -> Result<()> {
+    fn should_create_block() -> Result<()> {
         let block = fixture(&[("1.bin", "Hello"), ("2.bin", "World")])?;
         assert_eq!(block.len(), 2);
 
@@ -213,6 +216,13 @@ mod tests {
             "475e9b6e16f464efea93b8312b90ec02"
         );
 
+        Ok(())
+    }
+
+    #[test]
+    fn should_fail_if_no_file_are_given() -> Result<()> {
+        let block = Block::from_files("./test.bin", &[]);
+        assert!(block.is_err());
         Ok(())
     }
 
