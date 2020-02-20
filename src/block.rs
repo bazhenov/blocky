@@ -202,6 +202,23 @@ impl Block {
     }
 }
 
+/// Округляет целое беззнаковое целое `value` до следующего кратного `base`.
+/// 
+/// Например:
+/// ```rust
+/// assert_eq!(round_up_to(10, 12), 12);
+/// assert_eq!(round_up_to(12, 12), 12);
+/// assert_eq!(round_up_to(13, 12), 24);
+/// ```
+fn round_up_to(value: u32, base: u32) -> u32 {
+    let reminder = value % base;
+    if reminder == 0 {
+        value
+    } else {
+        value + base - reminder
+    }
+}
+
 #[cfg(test)]
 mod tests {
 
@@ -209,6 +226,14 @@ mod tests {
     use std::fs::File;
     use std::io::{Cursor, Write};
     use tempdir;
+
+    #[test]
+    fn test_power_of_two() {
+        assert_eq!(round_up_to(1, 2048), 2048);
+        assert_eq!(round_up_to(2048, 2048), 2048);
+        assert_eq!(round_up_to(2049, 2048), 2 * 2048);
+        assert_eq!(round_up_to(2 * 2048 + 1, 2048), 3 * 2048);
+    }
 
     fn fixture(files: &[(impl AsRef<Path>, impl AsRef<[u8]>)]) -> Result<Block> {
         let tmp = tempdir::TempDir::new("rust-block-test")?;
