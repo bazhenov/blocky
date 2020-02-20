@@ -4,7 +4,10 @@ use md5;
 use std::convert::TryFrom;
 use std::fmt::Debug;
 use std::fs::File;
-use std::io::{BufReader, BufWriter, Error, ErrorKind::NotFound, Write};
+use std::io::{
+    self, BufReader, BufWriter, Cursor, Error, ErrorKind::NotFound, Seek, SeekFrom, Write,
+};
+use std::mem::size_of;
 use std::ops::DerefMut;
 use std::path::Path;
 
@@ -26,7 +29,7 @@ pub struct FileInfo {
     pub id: u64,
 
     /// Размер файла в байтах
-    pub size: u64,
+    pub size: u32,
 
     /// Смещение первого байта файла относительно налача файла
     pub offset: u32,
@@ -43,10 +46,14 @@ pub struct AddFileRequest<'a> {
 
 impl FileInfo {
     fn new(file: &AddFileRequest) -> Result<Self> {
+        Self::new_at_offset(file, 0)
+    }
+
+    fn new_at_offset(file: &AddFileRequest, offset: u32) -> Result<Self> {
         Ok(Self {
             id: file.id,
-            size: file.path.metadata()?.len(),
-            offset: 0,
+            size: file.path.metadata()?.len() as u32,
+            offset,
             location_hash: md5::compute(file.location.to_str().unwrap()),
         })
     }
@@ -55,7 +62,7 @@ impl FileInfo {
 impl SelfSerialize for FileInfo {
     fn encode(&self, target: &mut impl WriteBytesExt) -> Result<()> {
         target.write_u64::<LE>(self.id)?;
-        target.write_u64::<LE>(self.size)?;
+        target.write_u32::<LE>(self.size)?;
         target.write_u32::<LE>(self.offset)?;
         target.write_all(self.location_hash.as_ref())?;
         Ok(())
@@ -63,7 +70,7 @@ impl SelfSerialize for FileInfo {
 
     fn decode(source: &mut impl ReadBytesExt) -> Result<Self> {
         let id = source.read_u64::<LE>()?;
-        let size = source.read_u64::<LE>()?;
+        let size = source.read_u32::<LE>()?;
         let offset = source.read_u32::<LE>()?;
         let mut location_hash = md5::Digest([0; 16]);
         source.read_exact(location_hash.deref_mut())?;
@@ -159,6 +166,8 @@ impl SelfSerialize for Block {
     }
 }
 
+const BLOCK_PAGE_SIZE: u32 = 1024;
+
 impl Block {
     pub fn from_files(block_path: impl AsRef<Path>, files: &[AddFileRequest]) -> Result<Block> {
         if files.is_empty() {
@@ -171,17 +180,39 @@ impl Block {
             return Err(Error::new(NotFound, message).into());
         }
 
-        let file_infos = files.iter().map(FileInfo::new).collect::<Result<_>>()?;
+        // Расчитываем смещения файлов в блоке и формируем заголовок
+        let header_size = (size_of::<Block>() + files.len() * size_of::<FileInfo>()) as u32;
+        let mut next_file_offset = round_up_to(header_size, BLOCK_PAGE_SIZE);
+        let mut file_infos = vec![];
+        for file in files {
+            let file_info = FileInfo::new_at_offset(file, next_file_offset)?;
+            next_file_offset = round_up_to(next_file_offset + file_info.size, BLOCK_PAGE_SIZE);
+            file_infos.push(file_info);
+        }
 
-        let mut block_file = BufWriter::new(File::create(&block_path)?);
         let block = Block {
             version: 1,
             file_info: file_infos,
         };
 
+        // Записываем блок заголовков в память, чтобы замерять суммарный размер заголовка
+        let mut block_file = File::create(&block_path)?;
         block
             .encode(&mut block_file)
             .chain_err(|| "Unable to write block header")?;
+
+        for (file, req) in block.file_info.iter().zip(files) {
+            block_file.set_len(file.offset.into())?;
+            block_file.seek(SeekFrom::End(0))?;
+            let mut writer = BufWriter::new(&block_file);
+            let mut reader = BufReader::new(File::open(req.path)?);
+            io::copy(&mut reader, &mut writer)
+                .chain_err(|| "Unable to copy a file to the block")?;
+        }
+
+        // Записываем заголовки в блок
+        block_file.seek(SeekFrom::Start(0))?;
+
         block_file.flush()?;
 
         Ok(block)
@@ -265,7 +296,7 @@ mod tests {
             })
             .collect::<Vec<_>>();
 
-        let block_path = tmp.join("test.block");
+        let block_path = "./target/test.block";
         Block::from_files(&block_path, &files)?;
         Ok(Block::open(&block_path)?)
     }
