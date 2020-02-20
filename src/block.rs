@@ -3,9 +3,9 @@ use byteorder::{ReadBytesExt, WriteBytesExt, LE};
 use md5;
 use std::convert::TryFrom;
 use std::fmt::Debug;
-use std::fs::File;
+use std::fs::{File, OpenOptions};
 use std::io::{
-    self, BufReader, BufWriter, Cursor, Error, ErrorKind::NotFound, Seek, SeekFrom, Write,
+    self, BufReader, BufWriter, Error, ErrorKind::NotFound, Seek, SeekFrom, Write,
 };
 use std::mem::size_of;
 use std::ops::DerefMut;
@@ -45,10 +45,6 @@ pub struct AddFileRequest<'a> {
 }
 
 impl FileInfo {
-    fn new(file: &AddFileRequest) -> Result<Self> {
-        Self::new_at_offset(file, 0)
-    }
-
     fn new_at_offset(file: &AddFileRequest, offset: u32) -> Result<Self> {
         Ok(Self {
             id: file.id,
@@ -196,7 +192,11 @@ impl Block {
         };
 
         // Записываем блок заголовков в память, чтобы замерять суммарный размер заголовка
-        let mut block_file = File::create(&block_path)?;
+
+        let mut block_file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&block_path)?;
         block
             .encode(&mut block_file)
             .chain_err(|| "Unable to write block header")?;
@@ -242,6 +242,11 @@ impl Block {
 /// assert_eq!(round_up_to(10, 12), 12);
 /// assert_eq!(round_up_to(12, 12), 12);
 /// assert_eq!(round_up_to(13, 12), 24);
+///
+/// assert_eq!(round_up_to(1, 2048), 2048);
+/// assert_eq!(round_up_to(2048, 2048), 2048);
+/// assert_eq!(round_up_to(2049, 2048), 2 * 2048);
+/// assert_eq!(round_up_to(2 * 2048 + 1, 2048), 3 * 2048);
 /// ```
 pub fn round_up_to(value: u32, base: u32) -> u32 {
     let reminder = value % base;
@@ -260,14 +265,6 @@ mod tests {
     use std::io::{Cursor, Write};
     use tempdir;
 
-    #[test]
-    fn test_power_of_two() {
-        assert_eq!(round_up_to(1, 2048), 2048);
-        assert_eq!(round_up_to(2048, 2048), 2048);
-        assert_eq!(round_up_to(2049, 2048), 2 * 2048);
-        assert_eq!(round_up_to(2 * 2048 + 1, 2048), 3 * 2048);
-    }
-
     fn fixture(files: &[(impl AsRef<Path>, impl AsRef<[u8]>)]) -> Result<Block> {
         let tmp = tempdir::TempDir::new("rust-block-test")?;
         let tmp = tmp.path();
@@ -285,24 +282,49 @@ mod tests {
             absolute_file_names.push(path);
         }
 
-        let files = absolute_file_names
+        let add_requests = absolute_file_names
             .iter()
             .zip(locations.iter())
             .enumerate()
-            .map(|i| AddFileRequest {
-                id: (i.0 + 1) as u64,
-                path: (i.1).0,
-                location: (i.1).1,
+            .map(|(id, (path, location))| AddFileRequest {
+                id: (id + 1) as u64,
+                path,
+                location,
             })
             .collect::<Vec<_>>();
 
-        let block_path = "./target/test.block";
-        Block::from_files(&block_path, &files)?;
+        let block_path = tmp.join("test.block");
+        Block::from_files(&block_path, &add_requests)?;
         Ok(Block::open(&block_path)?)
     }
 
     #[test]
-    fn should_create_block() -> Result<()> {
+    #[should_panic]
+    fn block_could_not_be_created_twice() {
+        let block_path_name = "./target/test.block";
+        Block::from_files(
+            block_path_name,
+            &[AddFileRequest {
+                id: 1,
+                path: Path::new("./foo"),
+                location: Path::new("./foo"),
+            }],
+        )
+        .unwrap();
+
+        Block::from_files(
+            block_path_name,
+            &[AddFileRequest {
+                id: 1,
+                path: Path::new("./foo"),
+                location: Path::new("./foo"),
+            }],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn should_be_able_to_create_block_and_return_file_info() -> Result<()> {
         let block = fixture(&[("1.bin", "Hello"), ("2.bin", "World")])?;
         assert_eq!(block.len(), 2);
 
@@ -321,6 +343,13 @@ mod tests {
             "475e9b6e16f464efea93b8312b90ec02"
         );
 
+        Ok(())
+    }
+
+    #[test]
+    fn should_be_able_to_return_block_content() -> Result<()> {
+        let block = fixture(&[("one.txt", "Result")])?;
+        let first_file = block.iter().find(|i| true).unwrap();
         Ok(())
     }
 
