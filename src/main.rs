@@ -1,31 +1,13 @@
 extern crate clap;
-extern crate md5;
 #[macro_use]
 extern crate error_chain;
+extern crate blocky;
 
-use crate::block::{AddFileRequest, Block};
+use ::blocky::block::{AddFileRequest, Block};
+use ::blocky::errors::*;
 use clap::{App, SubCommand, Values};
-pub use errors::*;
 use std::io::{self, Write};
 use std::path::Path;
-
-mod block;
-
-mod errors {
-    error_chain! {
-        errors {
-            NoFilesInBlock {
-
-            }
-            BlockCorrupted {
-                description("Illegal block structure")
-            }
-        }
-        foreign_links {
-            Io(::std::io::Error);
-        }
-    }
-}
 
 quick_main!(application);
 

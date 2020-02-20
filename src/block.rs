@@ -135,8 +135,7 @@ impl SelfSerialize for Block {
     fn encode(&self, target: &mut impl WriteBytesExt) -> Result<()> {
         target.write_u16::<LE>(self.version)?;
         let len = self.file_info.len();
-        let file_info_len =
-            u32::try_from(len).chain_err(|| "File id can't fit in u32")?;
+        let file_info_len = u32::try_from(len).chain_err(|| "File id can't fit in u32")?;
         target.write_u32::<LE>(file_info_len)?;
 
         for file_info in self.file_info.iter() {
@@ -180,7 +179,9 @@ impl Block {
             file_info: file_infos,
         };
 
-        block.encode(&mut block_file).chain_err(|| "Unable to write block header")?;
+        block
+            .encode(&mut block_file)
+            .chain_err(|| "Unable to write block header")?;
         block_file.flush()?;
 
         Ok(block)
@@ -203,7 +204,7 @@ impl Block {
 }
 
 /// Округляет целое беззнаковое целое `value` до следующего кратного `base`.
-/// 
+///
 /// Например:
 /// ```rust
 /// assert_eq!(round_up_to(10, 12), 12);
