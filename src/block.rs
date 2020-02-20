@@ -5,7 +5,7 @@ use std::convert::TryFrom;
 use std::fmt::Debug;
 use std::fs::{File, OpenOptions};
 use std::io::{
-    self, BufReader, BufWriter, Error, ErrorKind::NotFound, Seek, SeekFrom, Write,
+    self, BufReader, BufWriter, Error, ErrorKind::NotFound, Seek, SeekFrom, Write, Read
 };
 use std::mem::size_of;
 use std::ops::DerefMut;
@@ -129,12 +129,16 @@ impl SelfSerialize for FileInfo {
 ///
 /// [`FileInfo`]: struct.FileInfo.html
 #[derive(Debug, Default, Eq, PartialEq)]
-pub struct Block {
+pub struct BlockHeader {
     version: u16,
     file_info: Vec<FileInfo>,
 }
 
-impl SelfSerialize for Block {
+pub struct Block {
+    header: BlockHeader
+}
+
+impl SelfSerialize for BlockHeader {
     fn encode(&self, target: &mut impl WriteBytesExt) -> Result<()> {
         target.write_u16::<LE>(self.version)?;
         let len = self.file_info.len();
@@ -186,7 +190,7 @@ impl Block {
             file_infos.push(file_info);
         }
 
-        let block = Block {
+        let header = BlockHeader {
             version: 1,
             file_info: file_infos,
         };
@@ -197,11 +201,11 @@ impl Block {
             .write(true)
             .create_new(true)
             .open(&block_path)?;
-        block
+        header
             .encode(&mut block_file)
             .chain_err(|| "Unable to write block header")?;
 
-        for (file, req) in block.file_info.iter().zip(files) {
+        for (file, req) in header.file_info.iter().zip(files) {
             block_file.set_len(file.offset.into())?;
             block_file.seek(SeekFrom::End(0))?;
             let mut writer = BufWriter::new(&block_file);
@@ -215,22 +219,28 @@ impl Block {
 
         block_file.flush()?;
 
-        Ok(block)
+        Ok(Block { header })
     }
 
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         let f = File::open(&path)?;
         let mut block_file = BufReader::new(f);
 
-        Block::decode(&mut block_file).chain_err(|| ErrorKind::BlockCorrupted)
+        let header = BlockHeader::decode(&mut block_file).chain_err(|| ErrorKind::BlockCorrupted)?;
+        Ok(Block { header })
+    }
+
+    pub fn file_at(&self, idx: usize) -> Result<impl Read> {
+        let offset = self.header.file_info[idx].offset;
+
     }
 
     pub fn len(&self) -> usize {
-        self.file_info.len()
+        self.header.file_info.len()
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &FileInfo> {
-        self.file_info.iter()
+        self.header.file_info.iter()
     }
 }
 
@@ -348,8 +358,11 @@ mod tests {
 
     #[test]
     fn should_be_able_to_return_block_content() -> Result<()> {
-        let block = fixture(&[("one.txt", "Result")])?;
-        let first_file = block.iter().find(|i| true).unwrap();
+        let block = fixture(&[("one.txt", "text-content")])?;
+        let reader = block.file_at(0)?;
+
+        assert_eq!("901a84918e4d5121ceae18305d2cd938", format!("{:x}", md5::compute(reader)));
+        
         Ok(())
     }
 
@@ -362,7 +375,7 @@ mod tests {
 
     #[test]
     fn read_write_cycle() -> Result<()> {
-        test_read_write_cycle(&Block {
+        test_read_write_cycle(&BlockHeader {
             version: 3,
             file_info: vec![FileInfo {
                 id: 1,
