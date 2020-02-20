@@ -4,7 +4,7 @@ use md5;
 use std::convert::TryFrom;
 use std::fmt::Debug;
 use std::fs::File;
-use std::io::{BufReader, BufWriter, Error, ErrorKind::InvalidData, ErrorKind::NotFound, Write};
+use std::io::{BufReader, BufWriter, Error, ErrorKind::NotFound, Write};
 use std::ops::DerefMut;
 use std::path::Path;
 
@@ -162,7 +162,7 @@ impl SelfSerialize for Block {
 
 impl Block {
     pub fn from_files(block_path: impl AsRef<Path>, files: &[AddFileRequest]) -> Result<Block> {
-        if files.len() <= 0 {
+        if files.is_empty() {
             bail!(ErrorKind::NoFilesInBlock);
         }
         let file_names = files.iter().map(|f| f.path).collect::<Vec<_>>();
