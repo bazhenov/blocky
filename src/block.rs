@@ -195,8 +195,6 @@ impl Block {
             file_info: file_infos,
         };
 
-        // Записываем блок заголовков в память, чтобы замерять суммарный размер заголовка
-
         let mut block_file = OpenOptions::new()
             .write(true)
             .create_new(true)
@@ -205,19 +203,16 @@ impl Block {
             .encode(&mut block_file)
             .chain_err(|| "Unable to write block header")?;
 
+        let mut writer = BufWriter::new(&block_file);
         for (file, req) in header.file_info.iter().zip(files) {
             block_file.set_len(file.offset.into())?;
-            block_file.seek(SeekFrom::End(0))?;
-            let mut writer = BufWriter::new(&block_file);
+            writer.seek(SeekFrom::End(0))?;
+            
             let mut reader = BufReader::new(File::open(req.path)?);
             io::copy(&mut reader, &mut writer)
                 .chain_err(|| "Unable to copy a file to the block")?;
         }
-
-        // Записываем заголовки в блок
-        block_file.seek(SeekFrom::Start(0))?;
-
-        block_file.flush()?;
+        writer.flush()?;
 
         Self::open(block_path)
     }
