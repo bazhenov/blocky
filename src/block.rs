@@ -5,11 +5,12 @@ use std::convert::TryFrom;
 use std::fmt::Debug;
 use std::fs::{File, OpenOptions};
 use std::io::{
-    self, BufReader, BufWriter, Error, ErrorKind::NotFound, Seek, SeekFrom, Write, Read
+    self, BufReader, BufWriter, Error, ErrorKind::NotFound, Seek, SeekFrom, Write, Read, Cursor
 };
 use std::mem::size_of;
 use std::ops::DerefMut;
 use std::path::Path;
+use memmap::{MmapOptions, Mmap};
 
 /// Трейт позволяющий произвольному типу самостоятельно реализовать логику
 /// собственной сераилизации/десериализации используя библиотеку byteorder.
@@ -135,7 +136,8 @@ pub struct BlockHeader {
 }
 
 pub struct Block {
-    header: BlockHeader
+    header: BlockHeader,
+    mmap: Mmap
 }
 
 impl SelfSerialize for BlockHeader {
@@ -219,20 +221,23 @@ impl Block {
 
         block_file.flush()?;
 
-        Ok(Block { header })
+        Self::open(block_path)
     }
 
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         let f = File::open(&path)?;
-        let mut block_file = BufReader::new(f);
+        let mut block_file = BufReader::new(&f);
 
         let header = BlockHeader::decode(&mut block_file).chain_err(|| ErrorKind::BlockCorrupted)?;
-        Ok(Block { header })
+        let mmap = unsafe { MmapOptions::new().map(&f)? };
+        Ok(Block { header, mmap })
     }
 
-    pub fn file_at(&self, idx: usize) -> Result<impl Read> {
-        let offset = self.header.file_info[idx].offset;
-
+    pub fn file_at(&self, idx: usize) -> Result<&impl AsRef<[u8]>> {
+        let info = &self.header.file_info[idx];
+        let start = info.offset as usize;
+        let end = (info.offset + info.size) as usize;
+        Ok(&self.mmap.as_ref()[start..end])
     }
 
     pub fn len(&self) -> usize {
