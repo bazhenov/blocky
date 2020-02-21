@@ -1,16 +1,14 @@
 use crate::errors::*;
 use byteorder::{ReadBytesExt, WriteBytesExt, LE};
 use md5;
+use memmap::{Mmap, MmapOptions};
 use std::convert::TryFrom;
 use std::fmt::Debug;
 use std::fs::{File, OpenOptions};
-use std::io::{
-    self, BufReader, BufWriter, Error, ErrorKind::NotFound, Seek, SeekFrom, Write, Read, Cursor
-};
+use std::io::{self, BufReader, BufWriter, Error, ErrorKind::NotFound, Seek, SeekFrom, Write};
 use std::mem::size_of;
 use std::ops::DerefMut;
 use std::path::Path;
-use memmap::{MmapOptions, Mmap};
 
 /// Трейт позволяющий произвольному типу самостоятельно реализовать логику
 /// собственной сераилизации/десериализации используя библиотеку byteorder.
@@ -137,7 +135,7 @@ pub struct BlockHeader {
 
 pub struct Block {
     header: BlockHeader,
-    mmap: Mmap
+    mmap: Mmap,
 }
 
 impl SelfSerialize for BlockHeader {
@@ -228,12 +226,13 @@ impl Block {
         let f = File::open(&path)?;
         let mut block_file = BufReader::new(&f);
 
-        let header = BlockHeader::decode(&mut block_file).chain_err(|| ErrorKind::BlockCorrupted)?;
+        let header =
+            BlockHeader::decode(&mut block_file).chain_err(|| ErrorKind::BlockCorrupted)?;
         let mmap = unsafe { MmapOptions::new().map(&f)? };
         Ok(Block { header, mmap })
     }
 
-    pub fn file_at(&self, idx: usize) -> Result<&impl AsRef<[u8]>> {
+    pub fn file_at(&self, idx: usize) -> Result<&[u8]> {
         let info = &self.header.file_info[idx];
         let start = info.offset as usize;
         let end = (info.offset + info.size) as usize;
@@ -363,11 +362,13 @@ mod tests {
 
     #[test]
     fn should_be_able_to_return_block_content() -> Result<()> {
-        let block = fixture(&[("one.txt", "text-content")])?;
+        let content = "text-content";
+        let block = fixture(&[("one.txt", content)])?;
         let reader = block.file_at(0)?;
 
-        assert_eq!("901a84918e4d5121ceae18305d2cd938", format!("{:x}", md5::compute(reader)));
-        
+        let expected_hash = md5::compute(content);
+        assert_eq!(expected_hash, md5::compute(reader));
+
         Ok(())
     }
 
