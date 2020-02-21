@@ -180,38 +180,42 @@ impl Block {
             return Err(Error::new(NotFound, message).into());
         }
 
-        // Расчитываем смещения файлов в блоке и формируем заголовок
+        let block_file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&block_path)?;
+        let mut writer = BufWriter::new(&block_file);
+        
         let header_size = (size_of::<Block>() + files.len() * size_of::<FileInfo>()) as u32;
-        let mut next_file_offset = round_up_to(header_size, BLOCK_PAGE_SIZE);
         let mut file_infos = vec![];
+        
+        // Добавляем файлы в блок и попутно формируем заголовки со смещениями файлов
+        let mut next_file_offset = round_up_to(header_size, BLOCK_PAGE_SIZE);
         for file in files {
+            block_file.set_len(next_file_offset as u64)?;
+            writer.seek(SeekFrom::End(0))?;
+            
+            let mut reader = BufReader::new(File::open(file.path)?);
+            let bytes_written = io::copy(&mut reader, &mut writer)
+                .chain_err(|| "Unable to copy a file to the block")?;
+
             let file_info = FileInfo::new_at_offset(file, next_file_offset)?;
+            assert!(bytes_written == file_info.size as u64);
             next_file_offset = round_up_to(next_file_offset + file_info.size, BLOCK_PAGE_SIZE);
+
             file_infos.push(file_info);
         }
 
+        // Пишем заголовки в блок
         let header = BlockHeader {
             version: 1,
             file_info: file_infos,
         };
-
-        let mut block_file = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&block_path)?;
+        writer.seek(SeekFrom::Start(0))?;
         header
-            .encode(&mut block_file)
+            .encode(&mut writer)
             .chain_err(|| "Unable to write block header")?;
 
-        let mut writer = BufWriter::new(&block_file);
-        for (file, req) in header.file_info.iter().zip(files) {
-            block_file.set_len(file.offset.into())?;
-            writer.seek(SeekFrom::End(0))?;
-            
-            let mut reader = BufReader::new(File::open(req.path)?);
-            io::copy(&mut reader, &mut writer)
-                .chain_err(|| "Unable to copy a file to the block")?;
-        }
         writer.flush()?;
 
         Self::open(block_path)
