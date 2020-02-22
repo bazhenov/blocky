@@ -72,7 +72,7 @@ fn inspect(opts: &ArgMatches) -> Result<()> {
         out.write_fmt(format_args!("{}\n", block_path))?;
         let block =
             Block::open(block_path).chain_err(|| format!("Fail to open block: {}", block_path))?;
-        
+
         if verbose {
             out.write_fmt(format_args!(
                 "{id:>10} {size:>10} {offset:>10} {location_hash:>32} {content_hash:>32} {location:}\n",
@@ -92,7 +92,6 @@ fn inspect(opts: &ArgMatches) -> Result<()> {
                 location_hash = "LOCATION HASH"
             ))?;
         }
-        
 
         for (idx, file) in block.iter().enumerate() {
             if verbose {
@@ -115,7 +114,6 @@ fn inspect(opts: &ArgMatches) -> Result<()> {
                     location_hash = file.location_hash
                 ))?;
             }
-            
         }
     }
 
