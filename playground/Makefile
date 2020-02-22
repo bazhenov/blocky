@@ -1,7 +1,12 @@
 .PHONY: inspect
 
-test.blk:
+TEST_BLOCK=test.blk
+
+clean: 
+	rm -f ${TEST_BLOCK}
+
+test.blk: clean
 	cargo run -- create $@ ../src/*
 
-inspect: test/.blk
-	cargo run -- inspect $<
+inspect: ${TEST_BLOCK}
+	cargo run -- inspect -v $<
