@@ -5,7 +5,9 @@ use memmap::{Mmap, MmapOptions};
 use std::convert::TryFrom;
 use std::fmt::Debug;
 use std::fs::{File, OpenOptions};
-use std::io::{self, BufReader, BufWriter, Error, ErrorKind::NotFound, Seek, SeekFrom, Write};
+use std::io::{
+    self, BufReader, BufWriter, Cursor, Error, ErrorKind::NotFound, Seek, SeekFrom, Write,
+};
 use std::mem::size_of;
 use std::ops::DerefMut;
 use std::path::Path;
@@ -20,6 +22,15 @@ trait SelfSerialize {
     fn decode(source: &mut impl ReadBytesExt) -> Result<Self>
     where
         Self: Sized;
+
+    /// Аналогичен методу `encode` за тем лишь исключением, что возвращает количество байт записанных
+    /// в низлежащий поток
+    fn write_to(&self, target: &mut impl Write) -> Result<u64> {
+        let mut buffer = Cursor::new(vec![]);
+        self.encode(&mut buffer)?;
+        target.write_all(buffer.get_ref())?;
+        Ok(buffer.position())
+    }
 }
 
 #[derive(Eq, PartialEq, Debug)]
@@ -183,25 +194,34 @@ impl Block {
         let block_file = OpenOptions::new()
             .write(true)
             .create_new(true)
-            .open(&block_path)?;
+            .open(&block_path)
+            .chain_err(|| {
+                ErrorKind::BlockFileAlreadyExists(block_path.as_ref().display().to_string())
+            })?;
         let mut writer = BufWriter::new(&block_file);
-        
+
         let header_size = (size_of::<Block>() + files.len() * size_of::<FileInfo>()) as u32;
         let mut file_infos = vec![];
-        
+
         // Добавляем файлы в блок и попутно формируем заголовки со смещениями файлов
         let mut next_file_offset = round_up_to(header_size, BLOCK_PAGE_SIZE);
         for file in files {
             block_file.set_len(next_file_offset as u64)?;
             writer.seek(SeekFrom::End(0))?;
-            
+
             let mut reader = BufReader::new(File::open(file.path)?);
-            let bytes_written = io::copy(&mut reader, &mut writer)
+            let file_header = FileHeader {
+                // TODO расчет хеша
+                hash: md5::compute(""),
+                location: file.location.to_str().map(String::from).unwrap(),
+            };
+            let mut bytes_written = file_header.write_to(&mut writer)?;
+            bytes_written += io::copy(&mut reader, &mut writer)
                 .chain_err(|| "Unable to copy a file to the block")?;
 
             let file_info = FileInfo::new_at_offset(file, next_file_offset)?;
-            assert!(bytes_written == file_info.size as u64);
-            next_file_offset = round_up_to(next_file_offset + file_info.size, BLOCK_PAGE_SIZE);
+            next_file_offset =
+                round_up_to(next_file_offset + bytes_written as u32, BLOCK_PAGE_SIZE);
 
             file_infos.push(file_info);
         }
@@ -231,11 +251,16 @@ impl Block {
         Ok(Block { header, mmap })
     }
 
-    pub fn file_at(&self, idx: usize) -> Result<&[u8]> {
+    pub fn file_at(&self, idx: usize) -> Result<(FileHeader, &[u8])> {
         let info = &self.header.file_info[idx];
-        let start = info.offset as usize;
-        let end = (info.offset + info.size) as usize;
-        Ok(&self.mmap.as_ref()[start..end])
+        let data = self.mmap.as_ref();
+
+        let mut cursor = Cursor::new(&data[info.offset as usize..]);
+        let header = FileHeader::decode(&mut cursor).chain_err(|| ErrorKind::HeaderCorrupted)?;
+
+        let start = (info.offset as u64 + cursor.position()) as usize;
+        let end = start + (info.size as usize);
+        Ok((header, &data[start..end]))
     }
 
     pub fn len(&self) -> usize {
@@ -244,6 +269,40 @@ impl Block {
 
     pub fn iter(&self) -> impl Iterator<Item = &FileInfo> {
         self.header.file_info.iter()
+    }
+}
+
+/// Заголовок файла. Пишется непосредственно перед содержимым
+/// файла в блоке.
+#[derive(Debug, Eq, PartialEq, Clone)]
+pub struct FileHeader {
+    /// контрольная суммы содердимого файла
+    pub hash: md5::Digest,
+
+    /// URL файла
+    pub location: String,
+}
+
+impl SelfSerialize for FileHeader {
+    fn encode(&self, target: &mut impl WriteBytesExt) -> Result<()> {
+        let location_length =
+            u16::try_from(self.location.len()).chain_err(|| "Fail name too long")?;
+        target.write_all(&*self.hash)?;
+        target.write_u16::<LE>(location_length)?;
+        target.write_all(self.location.as_bytes())?;
+        Ok(())
+    }
+    fn decode(source: &mut impl ReadBytesExt) -> Result<Self> {
+        let mut hash = [0u8; 16];
+        source.read_exact(&mut hash)?;
+        let location_length = source.read_u16::<LE>()?;
+        let mut utf8 = vec![0u8; location_length as usize];
+        source.read_exact(&mut utf8)?;
+
+        Ok(Self {
+            hash: md5::Digest(hash),
+            location: String::from_utf8(utf8).chain_err(|| "Unable to decode file location")?,
+        })
     }
 }
 
@@ -363,10 +422,9 @@ mod tests {
     fn should_be_able_to_return_block_content() -> Result<()> {
         let content = "text-content";
         let block = fixture(&[("one.txt", content)])?;
-        let reader = block.file_at(0)?;
+        let (_, bytes) = block.file_at(0)?;
 
-        let expected_hash = md5::compute(content);
-        assert_eq!(expected_hash, md5::compute(reader));
+        assert_eq!(md5::compute(content), md5::compute(bytes));
 
         Ok(())
     }
@@ -379,7 +437,7 @@ mod tests {
     }
 
     #[test]
-    fn read_write_cycle() -> Result<()> {
+    fn read_write_header() -> Result<()> {
         test_read_write_cycle(&BlockHeader {
             version: 3,
             file_info: vec![FileInfo {
@@ -388,6 +446,14 @@ mod tests {
                 offset: 0,
                 location_hash: md5::Digest([0u8; 16]),
             }],
+        })
+    }
+
+    #[test]
+    fn read_write_file_block() -> Result<()> {
+        test_read_write_cycle(&FileHeader {
+            hash: md5::compute("string"),
+            location: String::from("/foo/bar"),
         })
     }
 
