@@ -6,7 +6,7 @@ extern crate blocky;
 use ::blocky::block::{AddFileRequest, Block};
 use ::blocky::errors::*;
 use clap::{App, ArgMatches, SubCommand};
-use std::io::{self, Write};
+use std::io::{self, Write, stdout, BufWriter};
 
 quick_main!(application);
 
@@ -66,8 +66,8 @@ fn create(opts: &ArgMatches) -> Result<()> {
 fn inspect(opts: &ArgMatches) -> Result<()> {
     let block_paths = opts.values_of("INPUT").unwrap();
     let verbose = opts.is_present("verbose");
-    let stdout = io::stdout();
-    let mut out = io::BufWriter::new(stdout.lock());
+    let stdout = stdout();
+    let mut out = BufWriter::new(stdout.lock());
     for block_path in block_paths {
         out.write_fmt(format_args!("{}\n", block_path))?;
         let block =
@@ -75,7 +75,7 @@ fn inspect(opts: &ArgMatches) -> Result<()> {
 
         if verbose {
             out.write_fmt(format_args!(
-                "{id:>10} {size:>10} {offset:>10} {location_hash:>32} {content_hash:>32} {location:}\n",
+                "{id:>9} {size:>9} {offset:>9} {location_hash:>32} {content_hash:>32} {location:}\n",
                 id = "ID",
                 size = "SIZE",
                 offset = "OFFSET",
@@ -85,7 +85,7 @@ fn inspect(opts: &ArgMatches) -> Result<()> {
             ))?;
         } else {
             out.write_fmt(format_args!(
-                "{id:>10} {size:>10} {offset:>10} {location_hash:>32}\n",
+                "{id:>9} {size:>9} {offset:>9} {location_hash:>32}\n",
                 id = "ID",
                 size = "SIZE",
                 offset = "OFFSET",
@@ -97,21 +97,21 @@ fn inspect(opts: &ArgMatches) -> Result<()> {
             if verbose {
                 let (header, _) = block.file_at(idx)?;
                 out.write_fmt(format_args!(
-                    "{id:>10} {size:>10} {offset:>10} {location_hash:x} {content_hash:x} {location:<}\n",
+                    "{id:>9} {size:>9} {offset:>9} {location_hash:32} {content_hash:32} {location:<}\n",
                     id = file.id,
                     size = file.size,
                     offset = file.offset,
-                    location_hash = file.location_hash,
-                    content_hash = header.hash,
+                    location_hash = format!("{:x}", file.location_hash),
+                    content_hash = format!("{:x}", header.hash),
                     location = header.location,
                 ))?;
             } else {
                 out.write_fmt(format_args!(
-                    "{id:>10} {size:>10} {offset:>10} {location_hash:x}\n",
+                    "{id:>9} {size:>9} {offset:>9} {location_hash:32}\n",
                     id = file.id,
                     size = file.size,
                     offset = file.offset,
-                    location_hash = file.location_hash
+                    location_hash = format!("{:x}", file.location_hash)
                 ))?;
             }
         }
