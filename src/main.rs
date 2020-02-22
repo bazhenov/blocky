@@ -6,7 +6,7 @@ extern crate blocky;
 use ::blocky::block::{AddFileRequest, Block};
 use ::blocky::errors::*;
 use clap::{App, ArgMatches, SubCommand};
-use std::io::{self, Write, stdout, BufWriter};
+use std::io::{self, stdout, BufWriter, Write};
 
 quick_main!(application);
 
