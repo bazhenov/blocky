@@ -210,13 +210,17 @@ impl Block {
             writer.seek(SeekFrom::End(0))?;
 
             let mut reader = BufReader::new(File::open(file.path)?);
+            let mut memory_buffer = Cursor::new(vec![0u8]);
+            io::copy(&mut reader, &mut memory_buffer)?;
+            memory_buffer.set_position(0);
+
             let file_header = FileHeader {
                 // TODO расчет хеша
-                hash: md5::compute(""),
+                hash: md5::compute(memory_buffer.get_ref()),
                 location: file.location.to_str().map(String::from).unwrap(),
             };
             let mut bytes_written = file_header.write_to(&mut writer)?;
-            bytes_written += io::copy(&mut reader, &mut writer)
+            bytes_written += io::copy(&mut memory_buffer, &mut writer)
                 .chain_err(|| "Unable to copy a file to the block")?;
 
             let file_info = FileInfo::new_at_offset(file, next_file_offset)?;
@@ -422,9 +426,11 @@ mod tests {
     fn should_be_able_to_return_block_content() -> Result<()> {
         let content = "text-content";
         let block = fixture(&[("one.txt", content)])?;
-        let (_, bytes) = block.file_at(0)?;
+        let (header, bytes) = block.file_at(0)?;
 
-        assert_eq!(md5::compute(content), md5::compute(bytes));
+        let expected_hash = md5::compute(content);
+        assert_eq!(expected_hash, md5::compute(bytes));
+        assert_eq!(expected_hash, header.hash);
 
         Ok(())
     }

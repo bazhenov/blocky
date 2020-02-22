@@ -61,7 +61,7 @@ fn create(block_path: impl AsRef<Path>, files: Values) -> Result<()> {
         .collect::<Vec<_>>();
     Block::from_files(block_path, &files)
         .map(|_| ())
-        .chain_err(|| "Unable to open file")
+        .chain_err(|| "Unable to create block")
 }
 
 /// Выводит информацию о содержимом блока
@@ -73,20 +73,25 @@ fn inspect(block_paths: Values) -> Result<()> {
         let block =
             Block::open(block_path).chain_err(|| format!("Fail to open block: {}", block_path))?;
         out.write_fmt(format_args!(
-            "{id:>10} {size:>10} {offset:>10} {hash:>35}\n",
+            "{id:>10} {size:>10} {offset:>10} {location_hash:>32} {content_hash:>32} {location:}\n",
             id = "ID",
             size = "SIZE",
             offset = "OFFSET",
-            hash = "HASH",
+            location_hash = "LOCATION HASH",
+            content_hash = "CONTENT HASH",
+            location = "LOCATION",
         ))?;
 
-        for file in block.iter() {
+        for (idx, file) in block.iter().enumerate() {
+            let (header, _) = block.file_at(idx)?;
             out.write_fmt(format_args!(
-                "{id:>10} {size:>10} {offset:>10}    {hash:x}\n",
+                "{id:>10} {size:>10} {offset:>10} {location_hash:x} {content_hash:x} {location:<}\n",
                 id = file.id,
                 size = file.size,
                 offset = file.offset,
-                hash = file.location_hash
+                location_hash = file.location_hash,
+                content_hash = header.hash,
+                location = header.location,
             ))?;
         }
     }
