@@ -12,6 +12,14 @@ pub mod errors {
             BlockCorrupted {
                 description("Illegal block structure")
             }
+
+            HeaderCorrupted {
+                description("Header corrupted")
+            }
+
+            BlockFileAlreadyExists(path: String) {
+                display("Block file already exists: {}", path)
+            }
         }
         foreign_links {
             Io(::std::io::Error);
