@@ -1,3 +1,4 @@
+#[macro_use]
 extern crate clap;
 #[macro_use]
 extern crate error_chain;
@@ -28,12 +29,19 @@ fn application() -> Result<()> {
                 .about("Create new block")
                 .arg_from_usage("<BLOCK> 'Block file name'")
                 .arg_from_usage("<INPUT>... 'file list'"),
+        )
+        .subcommand(
+            SubCommand::with_name("export")
+                .about("Export file form the block")
+                .arg_from_usage("<BLOCK> 'Block file name'")
+                .arg_from_usage("<ID> 'File ID to be exported'"),
         );
 
     let matches = app.clone().get_matches();
     match matches.subcommand() {
         ("inspect", Some(opts)) => inspect(opts),
         ("create", Some(opts)) => create(opts),
+        ("export", Some(opts)) => export(opts),
         _ => {
             app.write_help(&mut io::stdout()).unwrap();
             Ok(())
@@ -95,7 +103,7 @@ fn inspect(opts: &ArgMatches) -> Result<()> {
 
         for (idx, file) in block.iter().enumerate() {
             if verbose {
-                let (header, _) = block.file_at(idx)?;
+                let (header, _) = block.file_at(idx).ok_or("Unable to read file from the block")?;
                 out.write_fmt(format_args!(
                     "{id:>9} {size:>9} {offset:>9} {location_hash:32} {content_hash:32} {location:<}\n",
                     id = file.id,
@@ -117,5 +125,17 @@ fn inspect(opts: &ArgMatches) -> Result<()> {
         }
     }
 
+    Ok(())
+}
+
+fn export(opts: &ArgMatches) -> Result<()> {
+    let block_file = opts.value_of("BLOCK").unwrap();
+    let id = value_t!(opts.value_of("ID"), u64)?;
+
+    let block = Block::open(block_file)?;
+    let (_, content) = block.file_by_id(id).ok_or(format!("File with id {} not found in a block", id))?;
+    let out = stdout();
+    let mut out = BufWriter::new(out.lock());
+    out.write_all(&content)?;
     Ok(())
 }

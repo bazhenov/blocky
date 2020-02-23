@@ -12,6 +12,8 @@ use std::mem::size_of;
 use std::ops::DerefMut;
 use std::path::Path;
 
+const BLOCK_PAGE_SIZE: u32 = 1024;
+
 /// Трейт позволяющий произвольному типу самостоятельно реализовать логику
 /// собственной сераилизации/десериализации используя библиотеку byteorder.
 ///
@@ -177,8 +179,6 @@ impl SelfSerialize for BlockHeader {
     }
 }
 
-const BLOCK_PAGE_SIZE: u32 = 1024;
-
 impl Block {
     pub fn from_files(block_path: impl AsRef<Path>, files: &[AddFileRequest]) -> Result<Block> {
         if files.is_empty() {
@@ -255,16 +255,24 @@ impl Block {
         Ok(Block { header, mmap })
     }
 
-    pub fn file_at(&self, idx: usize) -> Result<(FileHeader, &[u8])> {
+    pub fn file_at(&self, idx: usize) -> Option<(FileHeader, &[u8])> {
         let info = &self.header.file_info[idx];
         let data = self.mmap.as_ref();
 
         let mut cursor = Cursor::new(&data[info.offset as usize..]);
-        let header = FileHeader::decode(&mut cursor).chain_err(|| ErrorKind::HeaderCorrupted)?;
+        let header = FileHeader::decode(&mut cursor).chain_err(|| ErrorKind::HeaderCorrupted).unwrap();
 
         let start = (info.offset as u64 + cursor.position()) as usize;
         let end = start + (info.size as usize);
-        Ok((header, &data[start..end]))
+        Some((header, &data[start..end]))
+    }
+
+    pub fn file_by_id(&self, id: u64) -> Option<(FileHeader, &[u8])> {
+        self.header.file_info
+            .iter()
+            .enumerate()
+            .find(|(_, info)| info.id == id)
+            .and_then(|(idx, _)| self.file_at(idx))
     }
 
     pub fn len(&self) -> usize {
@@ -426,12 +434,23 @@ mod tests {
     fn should_be_able_to_return_block_content() -> Result<()> {
         let content = "text-content";
         let block = fixture(&[("one.txt", content)])?;
-        let (header, bytes) = block.file_at(0)?;
+        let (header, bytes) = block.file_at(0).unwrap();
 
         let expected_hash = md5::compute(content);
         assert_eq!(expected_hash, md5::compute(bytes));
         assert_eq!(expected_hash, header.hash);
 
+        Ok(())
+    }
+
+    #[test]
+    fn should_be_able_to_return_file_by_id() -> Result<()> {
+        let content = "text-content";
+        let block = fixture(&[("one.txt", content)])?;
+        // Файлы нумеруются последовательно, поэтому у первого файла id = 1
+        let (_, bytes) = block.file_by_id(1).unwrap();
+
+        assert_eq!(content, String::from_utf8_lossy(bytes));
         Ok(())
     }
 
