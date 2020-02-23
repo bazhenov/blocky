@@ -260,7 +260,9 @@ impl Block {
         let data = self.mmap.as_ref();
 
         let mut cursor = Cursor::new(&data[info.offset as usize..]);
-        let header = FileHeader::decode(&mut cursor).chain_err(|| ErrorKind::HeaderCorrupted).unwrap();
+        let header = FileHeader::decode(&mut cursor)
+            .chain_err(|| ErrorKind::HeaderCorrupted)
+            .unwrap();
 
         let start = (info.offset as u64 + cursor.position()) as usize;
         let end = start + (info.size as usize);
@@ -268,7 +270,8 @@ impl Block {
     }
 
     pub fn file_by_id(&self, id: u64) -> Option<(FileHeader, &[u8])> {
-        self.header.file_info
+        self.header
+            .file_info
             .iter()
             .enumerate()
             .find(|(_, info)| info.id == id)

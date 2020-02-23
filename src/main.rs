@@ -114,7 +114,9 @@ fn inspect(opts: &ArgMatches) -> Result<()> {
 
         for (idx, file) in block.iter().enumerate() {
             if verbose {
-                let (header, _) = block.file_at(idx).ok_or("Unable to read file from the block")?;
+                let (header, _) = block
+                    .file_at(idx)
+                    .ok_or("Unable to read file from the block")?;
                 out.write_fmt(format_args!(
                     "{id:>9} {size:>9} {offset:>9} {location_hash:32} {content_hash:32} {location:<}\n",
                     id = file.id,
@@ -144,7 +146,9 @@ fn export(opts: &ArgMatches) -> Result<()> {
     let id = value_t!(opts.value_of("ID"), u64)?;
 
     let block = Block::open(block_file)?;
-    let (_, content) = block.file_by_id(id).ok_or(format!("File with id {} not found in a block", id))?;
+    let (_, content) = block
+        .file_by_id(id)
+        .ok_or(format!("File with id {} not found in a block", id))?;
     let out = stdout();
     let mut out = BufWriter::new(out.lock());
     out.write_all(&content)?;
