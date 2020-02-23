@@ -5,9 +5,20 @@ extern crate error_chain;
 extern crate blocky;
 
 use ::blocky::block::{AddFileRequest, Block};
-use ::blocky::errors::*;
 use clap::{App, ArgMatches, SubCommand};
 use std::io::{self, stdout, BufWriter, Write};
+
+mod errors {
+    error_chain! {
+        foreign_links {
+            Clap(::clap::Error);
+            Io(::std::io::Error);
+            Blocky(::blocky::errors::Error);
+        }
+    }
+}
+
+use errors::*;
 
 quick_main!(application);
 

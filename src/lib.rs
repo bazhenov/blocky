@@ -1,6 +1,5 @@
 #[macro_use]
 extern crate error_chain;
-extern crate clap;
 
 pub mod block;
 
@@ -24,7 +23,6 @@ pub mod errors {
         }
         foreign_links {
             Io(::std::io::Error);
-            Clap(::clap::Error);
         }
     }
 }
