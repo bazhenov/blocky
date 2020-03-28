@@ -3,7 +3,7 @@ name: default
 
 steps:
 - name: test
-  image: rust:1.30
+  image: rust:1.42.0-alpine  
   commands:
   - cargo build --verbose --all
   - cargo test --verbose --all
